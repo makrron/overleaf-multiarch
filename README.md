@@ -87,18 +87,22 @@ services:
 
 ---
 
-## 🛠️ How it is Built
+## 🛠️ Automated Builds & Upstream Tracking
 
-Builds are powered by GitHub Actions using native runners:
-- **`linux/amd64`**: Built natively on standard GitHub `ubuntu-latest` runners.
-- **`linux/arm64`**: Built natively on GitHub-hosted `ubuntu-24.04-arm` runners (16 GB RAM, 4 vCPUs), avoiding slow QEMU emulation.
-- Both architectures are merged into an OCI multi-architecture manifest list using `docker buildx imagetools`.
+Builds are powered by GitHub Actions using native runners and scheduled triggers:
+- **⏰ Automatic Daily Check**: Runs every day at **06:00 UTC** (`schedule: cron '0 6 * * *'`). It queries the Docker Hub API for new releases of `sharelatex/sharelatex`. When an unbuilt version is discovered, it automatically initiates the multi-arch build without manual intervention.
+- **🚀 Native `linux/amd64`**: Reuses the official, verified Overleaf `sharelatex/sharelatex:<version>` image or compiles natively on GitHub `ubuntu-latest` runners.
+- **🚀 Native `linux/arm64`**: Compiles natively on GitHub-hosted `ubuntu-24.04-arm` runners (16 GB RAM, 4 vCPUs) in ~5 minutes, avoiding slow QEMU emulation.
+- **✨ Multi-Arch Manifest**: Both architectures are merged into an OCI manifest list using `docker buildx imagetools`.
 
-### Triggering a New Build
+### Manual Build Trigger
 
+You can also trigger a build on-demand at any time:
 1. Go to the **Actions** tab in this repository.
 2. Select the **Build Overleaf Multi-Arch** workflow.
-3. Click **Run workflow**, specify the desired Overleaf version tag (e.g. `6.3.0`), and launch.
+3. Click **Run workflow**:
+   - Leave `version` blank to auto-detect the latest release, or type a specific version (e.g. `6.3.0`).
+   - Click **Run workflow**.
 
 ---
 
@@ -106,3 +110,4 @@ Builds are powered by GitHub Actions using native runners:
 
 - Build configuration and workflow scripts in this repository are licensed under the [MIT License](LICENSE).
 - Overleaf Community Edition source code is licensed under the [GNU AGPLv3](https://github.com/overleaf/overleaf/blob/main/LICENSE).
+
