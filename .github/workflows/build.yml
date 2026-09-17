@@ -38,6 +38,9 @@ jobs:
       git_ref: ${{ steps.check.outputs.git_ref }}
 
     steps:
+      - name: Checkout repository scripts
+        uses: actions/checkout@v4
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -45,61 +48,9 @@ jobs:
         id: check
         run: |
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
-          MANUAL_VERSION="${{ inputs.version }}"
-          GIT_REF="${{ inputs.git_ref || 'main' }}"
-          USE_OFFICIAL_AMD64="${{ inputs.use_official_amd64 != false }}"
-
-          if [ -n "$MANUAL_VERSION" ]; then
-            echo "Manual build requested for version: $MANUAL_VERSION"
-            TARGET_VERSION="$MANUAL_VERSION"
-            NEEDS_BUILD="true"
-          else
-            echo "Querying Docker Hub API for latest stable sharelatex/sharelatex tags..."
-            LATEST_TAG=$(python3 -c "
-import urllib.request, json, re
-
-url = 'https://registry.hub.docker.com/v2/repositories/sharelatex/sharelatex/tags?page_size=100'
-req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-try:
-    data = json.loads(urllib.request.urlopen(req, timeout=15).read())
-    semver_regex = re.compile(r'^[0-9]+\.[0-9]+\.[0-9]+$')
-    valid = []
-    for r in data.get('results', []):
-        tag = r.get('name', '')
-        if semver_regex.match(tag):
-            parts = tuple(map(int, tag.split('.')))
-            valid.append((parts, tag))
-    valid.sort(reverse=True)
-    if valid:
-        print(valid[0][1])
-except Exception as e:
-    print('')
-")
-            if [ -z "$LATEST_TAG" ]; then
-              echo "::error::Failed to query latest version from Docker Hub"
-              exit 1
-            fi
-
-            echo "Latest upstream Overleaf version: $LATEST_TAG"
-            TARGET_VERSION="$LATEST_TAG"
-
-            echo "Checking if $IMAGE_LOWER:$TARGET_VERSION already exists with both amd64 and arm64..."
-            INSPECT_OUTPUT=$(docker buildx imagetools inspect "${IMAGE_LOWER}:${TARGET_VERSION}" 2>/dev/null || true)
-
-            if echo "$INSPECT_OUTPUT" | grep -q "linux/amd64" && echo "$INSPECT_OUTPUT" | grep -q "linux/arm64"; then
-              echo "✅ Version $TARGET_VERSION is already built and published with multi-arch (amd64 & arm64)."
-              echo "No build required."
-              NEEDS_BUILD="false"
-            else
-              echo "🚀 New version or incomplete image detected ($TARGET_VERSION). Triggering build!"
-              NEEDS_BUILD="true"
-            fi
-          fi
-
-          echo "version=$TARGET_VERSION" >> "$GITHUB_OUTPUT"
-          echo "needs_build=$NEEDS_BUILD" >> "$GITHUB_OUTPUT"
-          echo "use_official_amd64=$USE_OFFICIAL_AMD64" >> "$GITHUB_OUTPUT"
-          echo "git_ref=$GIT_REF" >> "$GITHUB_OUTPUT"
+          python3 .github/scripts/check_version.py "${IMAGE_LOWER}" "${{ inputs.version }}" "$GITHUB_OUTPUT"
+          echo "use_official_amd64=${{ inputs.use_official_amd64 != false }}" >> "$GITHUB_OUTPUT"
+          echo "git_ref=${{ inputs.git_ref || 'main' }}" >> "$GITHUB_OUTPUT"
 
   # ------------------------------------------------------------
   # 1. Prepare linux/amd64
@@ -127,9 +78,9 @@ except Exception as e:
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
           VERSION="${{ needs.check-version.outputs.version }}"
           echo "Pulling official sharelatex/sharelatex:${VERSION} for linux/amd64..."
-          docker pull --platform linux/amd64 sharelatex/sharelatex:${VERSION}
-          docker tag sharelatex/sharelatex:${VERSION} ${IMAGE_LOWER}:${VERSION}-amd64
-          docker push ${IMAGE_LOWER}:${VERSION}-amd64
+          docker pull --platform linux/amd64 "sharelatex/sharelatex:${VERSION}"
+          docker tag "sharelatex/sharelatex:${VERSION}" "${IMAGE_LOWER}:${VERSION}-amd64"
+          docker push "${IMAGE_LOWER}:${VERSION}-amd64"
 
       - name: Checkout Overleaf source (build from source)
         if: ${{ needs.check-version.outputs.use_official_amd64 != 'true' }}
@@ -154,8 +105,8 @@ except Exception as e:
 
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
           VERSION="${{ needs.check-version.outputs.version }}"
-          docker tag sharelatex/sharelatex:build-amd64 ${IMAGE_LOWER}:${VERSION}-amd64
-          docker push ${IMAGE_LOWER}:${VERSION}-amd64
+          docker tag sharelatex/sharelatex:build-amd64 "${IMAGE_LOWER}:${VERSION}-amd64"
+          docker push "${IMAGE_LOWER}:${VERSION}-amd64"
 
   # ------------------------------------------------------------
   # 2. Native ARM64 build (uses GitHub-hosted ubuntu-24.04-arm runner)
@@ -199,8 +150,8 @@ except Exception as e:
         run: |
           IMAGE_LOWER=$(echo "${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}" | tr '[:upper:]' '[:lower:]')
           VERSION="${{ needs.check-version.outputs.version }}"
-          docker tag sharelatex/sharelatex:build-arm64 ${IMAGE_LOWER}:${VERSION}-arm64
-          docker push ${IMAGE_LOWER}:${VERSION}-arm64
+          docker tag sharelatex/sharelatex:build-arm64 "${IMAGE_LOWER}:${VERSION}-arm64"
+          docker push "${IMAGE_LOWER}:${VERSION}-arm64"
 
   # ------------------------------------------------------------
   # 3. Create and push multi-architecture manifest
@@ -230,13 +181,12 @@ except Exception as e:
           VERSION="${{ needs.check-version.outputs.version }}"
 
           docker buildx imagetools create \
-            --tag ${IMAGE_LOWER}:${VERSION} \
-            --tag ${IMAGE_LOWER}:latest \
-            ${IMAGE_LOWER}:${VERSION}-amd64 \
-            ${IMAGE_LOWER}:${VERSION}-arm64
+            --tag "${IMAGE_LOWER}:${VERSION}" \
+            --tag "${IMAGE_LOWER}:latest" \
+            "${IMAGE_LOWER}:${VERSION}-amd64" \
+            "${IMAGE_LOWER}:${VERSION}-arm64"
 
           echo "========================================================"
           echo "Multi-architecture image successfully pushed:"
           echo "Image: ${IMAGE_LOWER}:${VERSION}"
           echo "========================================================"
-
