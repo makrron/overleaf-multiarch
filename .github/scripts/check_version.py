@@ -25,54 +25,6 @@ def get_latest_upstream_version():
         print(f"Error querying Docker Hub: {e}", file=sys.stderr)
     return None
 
-def get_revision_from_dockerhub(image_name, tag):
-    """
-    Fetches the exact commit SHA of the official Overleaf release from the
-    com.overleaf.ce.revision OCI label without downloading any image layers.
-    """
-    try:
-        token_url = f"https://auth.docker.io/token?service=registry.docker.io&scope=repository:{image_name}:pull"
-        req = urllib.request.Request(token_url, headers={"User-Agent": "Mozilla/5.0"})
-        token_data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
-        token = token_data.get("token")
-        if not token:
-            return None
-
-        manifest_url = f"https://registry-1.docker.io/v2/{image_name}/manifests/{tag}"
-        req = urllib.request.Request(manifest_url, headers={
-            "User-Agent": "Mozilla/5.0",
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json"
-        })
-        manifest = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
-
-        if "manifests" in manifest:
-            for m in manifest["manifests"]:
-                if m.get("platform", {}).get("architecture") == "amd64":
-                    req = urllib.request.Request(f"https://registry-1.docker.io/v2/{image_name}/manifests/{m['digest']}", headers={
-                        "User-Agent": "Mozilla/5.0",
-                        "Authorization": f"Bearer {token}",
-                        "Accept": "application/vnd.docker.distribution.manifest.v2+json, application/vnd.oci.image.manifest.v1+json"
-                    })
-                    manifest = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
-                    break
-
-        config_digest = manifest.get("config", {}).get("digest")
-        if not config_digest:
-            return None
-
-        blob_url = f"https://registry-1.docker.io/v2/{image_name}/blobs/{config_digest}"
-        req = urllib.request.Request(blob_url, headers={
-            "User-Agent": "Mozilla/5.0",
-            "Authorization": f"Bearer {token}"
-        })
-        config_data = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
-        revision = config_data.get("config", {}).get("Labels", {}).get("com.overleaf.ce.revision")
-        return revision
-    except Exception as e:
-        print(f"Warning: could not fetch revision from Docker Hub for {image_name}:{tag}: {e}", file=sys.stderr)
-        return None
-
 def check_image_exists_with_both_archs(image_tag):
     try:
         res = subprocess.run(
@@ -122,19 +74,8 @@ def main():
             print(f"🚀 New version or incomplete multi-arch image ({target_version}). Triggering build!")
             needs_build = True
 
-    # Determine exact git_ref
-    if manual_git_ref:
-        git_ref = manual_git_ref
-        print(f"Using explicitly requested git_ref: {git_ref}")
-    else:
-        print(f"Resolving exact git commit from official sharelatex/sharelatex:{target_version}...")
-        official_commit = get_revision_from_dockerhub("sharelatex/sharelatex", target_version)
-        if official_commit:
-            git_ref = official_commit
-            print(f"✅ Found official release commit SHA: {git_ref}")
-        else:
-            git_ref = "main"
-            print("⚠️ Could not detect official commit SHA, falling back to 'main'")
+    # Use explicitly requested git_ref or default to 'main'
+    git_ref = manual_git_ref if manual_git_ref else "main"
 
     print(f"Result: target_version={target_version}, needs_build={needs_build}, git_ref={git_ref}")
 

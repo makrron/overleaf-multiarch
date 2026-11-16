@@ -11,9 +11,9 @@ on:
         required: false
         default: ''
       git_ref:
-        description: 'Git ref in overleaf/overleaf to build arm64 from (leave empty to auto-detect from official image)'
+        description: 'Git ref in overleaf/overleaf to build arm64 from (default: main)'
         required: false
-        default: ''
+        default: 'main'
       use_official_amd64:
         description: 'Reuse official sharelatex/sharelatex:<version> for amd64 (faster & 100% official)'
         type: boolean
@@ -95,10 +95,9 @@ jobs:
       - name: Build Overleaf CE amd64 from source
         if: ${{ needs.check-version.outputs.use_official_amd64 != 'true' }}
         run: |
-          # Apply local .npmrc to prevent ERESOLVE conflicts during Yarn git-subpackage packing
-          echo "legacy-peer-deps=true" > .npmrc
           cd server-ce
-          echo "legacy-peer-deps=true" > .npmrc
+          # Inject legacy-peer-deps into container build to prevent ERESOLVE failures during yarn git package packaging
+          sed -i 's|RUN corepack enable|RUN npm config set legacy-peer-deps true --global \&\& corepack enable|' Dockerfile
           export OVERLEAF_BASE_TAG="sharelatex/sharelatex-base:build-amd64"
           export OVERLEAF_BRANCH="sharelatex/sharelatex:build-amd64"
           export OVERLEAF_TAG="sharelatex/sharelatex:build-amd64"
@@ -141,10 +140,9 @@ jobs:
 
       - name: Build Overleaf CE (arm64 native)
         run: |
-          # Apply local .npmrc to prevent ERESOLVE conflicts during Yarn git-subpackage packing
-          echo "legacy-peer-deps=true" > .npmrc
           cd server-ce
-          echo "legacy-peer-deps=true" > .npmrc
+          # Inject legacy-peer-deps into container build to prevent ERESOLVE failures during yarn git package packaging
+          sed -i 's|RUN corepack enable|RUN npm config set legacy-peer-deps true --global \&\& corepack enable|' Dockerfile
           export OVERLEAF_BASE_TAG="sharelatex/sharelatex-base:build-arm64"
           export OVERLEAF_BRANCH="sharelatex/sharelatex:build-arm64"
           export OVERLEAF_TAG="sharelatex/sharelatex:build-arm64"
